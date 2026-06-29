@@ -1,7 +1,6 @@
 import {
   FontAwesome5,
   Ionicons,
-  MaterialCommunityIcons,
 } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
@@ -64,69 +63,70 @@ const AssetRow = ({ icon, name, amount, symbol, percent, color, value, isFutures
   </View>
 );
 
-const TransactionItem = ({ item }) => {
-  let iconName = "swap-horizontal";
-  let iconColor = Colors.text;
-  let bgColor = "rgba(255,255,255,0.1)";
-  let sign = "";
-  let typeText = item.type;
-
-  if (item.type === "Deposit") {
-    iconName = "arrow-bottom-left";
-    iconColor = Colors.up;
-    bgColor = "rgba(38, 166, 154, 0.1)";
-    sign = "+";
-  } else if (item.type === "Withdraw") {
-    iconName = "arrow-top-right";
-    iconColor = Colors.down;
-    bgColor = "rgba(239, 83, 80, 0.1)";
-    sign = "-";
-  } else if (item.type === "BUY" || item.type === "LONG") {
-    iconName = "basket";
-    iconColor = Colors.up;
-    bgColor = "rgba(38, 166, 154, 0.1)";
-    typeText = item.type === "LONG" ? "Long Open" : "Buy Spot";
-  } else if (item.type === "SELL" || item.type === "SHORT") {
-    iconName = "cash";
-    iconColor = Colors.down;
-    bgColor = "rgba(239, 83, 80, 0.1)";
-    typeText = item.type === "SHORT" ? "Short Open" : "Sell Spot";
-  } else if (item.type === "CLOSE") {
-    iconName = "close-circle-outline";
-    iconColor = item.pnl >= 0 ? Colors.up : Colors.down;
-    bgColor = "rgba(255,255,255,0.1)";
-    typeText = "Position Closed";
-  }
-
-  const dateObj = new Date(item.date);
+const PositionHistoryItem = ({ item }) => {
+  const isProfit = (item.pnl || 0) >= 0;
+  const side = (item.side || "LONG").toUpperCase();
+  const sideColor = side === "LONG" ? Colors.up : Colors.down;
+  const pnlColor = isProfit ? Colors.up : Colors.down;
+  const closedAt = item.closedAt || item.date;
+  const dateObj = new Date(closedAt);
   const dateStr =
-    dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+    dateObj.toLocaleDateString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }) +
     " " +
-    dateObj.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+    dateObj.toLocaleTimeString("ko-KR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
 
-  const value = item.amount ? item.amount : item.price * item.quantity;
+  const entryPrice = item.entryPrice || 0;
+  const exitPrice = item.exitPrice || 0;
+  const margin = item.margin || 0;
+  const leverage = item.leverage || 1;
 
   return (
     <View style={styles.txItem}>
-      <View style={styles.txLeft}>
-        <View style={[styles.txIcon, { backgroundColor: bgColor }]}>
-          <MaterialCommunityIcons name={iconName} size={20} color={iconColor} />
+      <View style={{ flex: 1 }}>
+        <View style={styles.historyTopRow}>
+          <Text style={styles.txType}>{item.symbol || "-"}</Text>
+          <View style={[styles.sideBadge, { backgroundColor: "rgba(255,255,255,0.1)" }]}>
+            <Text style={[styles.sideBadgeText, { color: sideColor }]}>{side}</Text>
+          </View>
+          <Text style={styles.historyType}>{item.type || "FUTURES"}</Text>
         </View>
-        <View>
-          <Text style={styles.txType}>
-            {typeText}{" "}
-            <Text style={{ fontSize: 12, color: Colors.textDim }}>
-              {item.symbol ? item.symbol.replace("USDT", "") : "USD"}
-            </Text>
+        <Text style={styles.txDate}>시간: {dateStr}</Text>
+        <View style={styles.priceRow}>
+          <Text style={styles.priceLabel}>
+            마진: <Text style={styles.priceValue}>${margin.toLocaleString(undefined, { maximumFractionDigits: 2 })}</Text>
           </Text>
-          <Text style={styles.txDate}>{dateStr}</Text>
+          <Text style={styles.priceLabel}>
+            배율: <Text style={styles.priceValue}>x{leverage}</Text>
+          </Text>
+        </View>
+        <View style={styles.priceRow}>
+          <Text style={styles.priceLabel}>
+            진입: <Text style={styles.priceValue}>${entryPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</Text>
+          </Text>
+          <Text style={styles.priceLabel}>
+            청산: <Text style={styles.priceValue}>${exitPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</Text>
+          </Text>
         </View>
       </View>
+
       <View style={{ alignItems: "flex-end" }}>
-        <Text style={[styles.txAmount, { color: iconColor }]}>
-          {sign}${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+        <Text style={[styles.txAmount, { color: pnlColor }]}>
+          {isProfit ? "+" : ""}${(item.pnl || 0).toLocaleString(undefined, {
+            maximumFractionDigits: 2,
+          })}
         </Text>
-        <Text style={styles.txStatus}>Done</Text>
+        <Text style={[styles.txStatus, { color: pnlColor }]}> 
+          수익률 {isProfit ? "+" : ""}{(item.roi || 0).toFixed(2)}%
+        </Text>
       </View>
     </View>
   );
@@ -135,7 +135,7 @@ const TransactionItem = ({ item }) => {
 export default function AssetsScreen() {
   const [totalEquity, setTotalEquity] = useState(0);
   const [pnl, setPnl] = useState({ amount: 0, percent: 0 });
-  const [transactions, setTransactions] = useState([]);
+  const [positionHistory, setPositionHistory] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
   const [isAddFundVisible, setIsAddFundVisible] = useState(false);
   const [hideBalance, setHideBalance] = useState(false);
@@ -148,9 +148,12 @@ export default function AssetsScreen() {
       const positions = await Storage.getPositions();
       let totalUnrealizedPnl = 0;
 
-      const history = await Storage.getTransactions();
-      history.sort((a, b) => new Date(b.date) - new Date(a.date));
-      setTransactions(history);
+      const history = await Storage.getPositionHistory();
+      history.sort(
+        (a, b) =>
+          new Date(b.closedAt || b.date) - new Date(a.closedAt || a.date),
+      );
+      setPositionHistory(history);
 
       const spotHoldings = await Storage.getSpotHoldings();
 
@@ -404,7 +407,7 @@ export default function AssetsScreen() {
             }}
           >
             <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>
-              Last Transaction
+              Last Position Result
             </Text>
             <TouchableOpacity onPress={() => setHistoryVisible(true)}>
               <Text
@@ -421,8 +424,8 @@ export default function AssetsScreen() {
           </View>
 
           <BlurView intensity={20} tint="dark" style={styles.card}>
-            {transactions.length > 0 ? (
-              <TransactionItem item={transactions[0]} />
+            {positionHistory.length > 0 ? (
+              <PositionHistoryItem item={positionHistory[0]} />
             ) : (
               <Text
                 style={{
@@ -432,7 +435,7 @@ export default function AssetsScreen() {
                   fontSize: 12,
                 }}
               >
-                No transactions yet.
+                No position history yet.
               </Text>
             )}
           </BlurView>
@@ -467,12 +470,12 @@ export default function AssetsScreen() {
               >
                 <Ionicons name="chevron-back" size={24} color="#fff" />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>Transaction History</Text>
+              <Text style={styles.modalTitle}>Position History</Text>
               <View style={{ width: 40 }} />
             </View>
 
             <FlatList
-              data={transactions}
+              data={positionHistory}
               keyExtractor={(item) => item.id}
               contentContainerStyle={{
                 paddingHorizontal: 20,
@@ -485,7 +488,7 @@ export default function AssetsScreen() {
                     borderBottomColor: "rgba(255,255,255,0.05)",
                   }}
                 >
-                  <TransactionItem item={item} />
+                  <PositionHistoryItem item={item} />
                 </View>
               )}
               ListEmptyComponent={
@@ -496,7 +499,7 @@ export default function AssetsScreen() {
                     marginTop: 50,
                   }}
                 >
-                  No records found.
+                  No position records found.
                 </Text>
               }
             />
@@ -604,7 +607,40 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   txType: { color: "#fff", fontWeight: "bold", fontSize: 14 },
+  historyTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 4,
+  },
+  sideBadge: {
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  sideBadgeText: {
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  historyType: {
+    color: Colors.textDim,
+    fontSize: 11,
+    fontWeight: "600",
+  },
   txDate: { color: Colors.textDim, fontSize: 11, marginTop: 2 },
+  priceRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 6,
+  },
+  priceLabel: {
+    color: Colors.textDim,
+    fontSize: 10,
+  },
+  priceValue: {
+    color: "#fff",
+    fontWeight: "600",
+  },
   txAmount: { fontWeight: "bold", fontSize: 14 },
   txStatus: {
     color: Colors.textDim,

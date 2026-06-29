@@ -5,6 +5,7 @@ const KEYS = {
   POSITIONS: "user_positions",
   HOLDINGS: "user_spot_holdings",
   TRANSACTIONS: "user_transactions",
+  POSITION_HISTORY: "user_position_history",
 };
 
 const INITIAL_BALANCE = 10000;
@@ -42,6 +43,46 @@ export const Storage = {
     try {
       const jsonValue = await AsyncStorage.getItem(KEYS.TRANSACTIONS);
       return jsonValue != null ? JSON.parse(jsonValue) : [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  getPositionHistory: async () => {
+    try {
+      const jsonValue = await AsyncStorage.getItem(KEYS.POSITION_HISTORY);
+      if (jsonValue != null) {
+        return JSON.parse(jsonValue);
+      }
+
+      const transactions = await Storage.getTransactions();
+      const migrated = transactions
+        .filter((tx) => tx.type === "CLOSE")
+        .map((tx) => {
+          const pnl = parseFloat(tx.pnl) || 0;
+          const returnAmount = parseFloat(tx.amount) || 0;
+          const margin = returnAmount - pnl;
+          const roi = margin > 0 ? (pnl / margin) * 100 : 0;
+
+          return {
+            id: `migrated-${tx.id}`,
+            positionId: null,
+            symbol: tx.symbol,
+            side: "LONG",
+            type: "FUTURES",
+            leverage: null,
+            margin: margin > 0 ? margin : 0,
+            entryPrice: null,
+            exitPrice: null,
+            openedAt: tx.date,
+            closedAt: tx.date,
+            pnl,
+            roi,
+          };
+        });
+
+      await AsyncStorage.setItem(KEYS.POSITION_HISTORY, JSON.stringify(migrated));
+      return migrated;
     } catch (e) {
       return [];
     }
@@ -148,7 +189,12 @@ export const Storage = {
       await AsyncStorage.setItem(KEYS.BALANCE, newBalance.toString());
 
       const positions = await Storage.getPositions();
-      const newPosition = { ...position, id: Date.now().toString() };
+      const nowIso = new Date().toISOString();
+      const newPosition = {
+        ...position,
+        id: Date.now().toString(),
+        openedAt: position.openedAt || nowIso,
+      };
       const newPositions = [newPosition, ...positions];
       await AsyncStorage.setItem(KEYS.POSITIONS, JSON.stringify(newPositions));
 
@@ -173,7 +219,7 @@ export const Storage = {
     }
   },
 
-  closePosition: async (id, finalPnl) => {
+  closePosition: async (id, finalPnl, closePrice = 0) => {
     try {
       const positions = await Storage.getPositions();
       const target = positions.find((p) => p.id === id);
@@ -187,6 +233,32 @@ export const Storage = {
 
       const remaining = positions.filter((p) => p.id !== id);
       await AsyncStorage.setItem(KEYS.POSITIONS, JSON.stringify(remaining));
+
+      const closedAt = new Date().toISOString();
+      const margin = parseFloat(target.margin) || 0;
+      const pnlAmount = parseFloat(finalPnl) || 0;
+      const roi = margin > 0 ? (pnlAmount / margin) * 100 : 0;
+
+      const positionHistory = await Storage.getPositionHistory();
+      positionHistory.push({
+        id: Date.now().toString(),
+        positionId: target.id,
+        symbol: target.symbol,
+        side: target.side || target.type || "LONG",
+        type: "FUTURES",
+        leverage: target.leverage,
+        margin,
+        entryPrice: target.entryPrice,
+        exitPrice: parseFloat(closePrice) || 0,
+        openedAt: target.openedAt || new Date(target.timestamp || Date.now()).toISOString(),
+        closedAt,
+        pnl: pnlAmount,
+        roi,
+      });
+      await AsyncStorage.setItem(
+        KEYS.POSITION_HISTORY,
+        JSON.stringify(positionHistory),
+      );
 
       const transactions = await Storage.getTransactions();
       transactions.push({
@@ -215,6 +287,7 @@ export const Storage = {
       await AsyncStorage.setItem(KEYS.POSITIONS, JSON.stringify([]));
       await AsyncStorage.setItem(KEYS.HOLDINGS, JSON.stringify({}));
       await AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify([]));
+      await AsyncStorage.setItem(KEYS.POSITION_HISTORY, JSON.stringify([]));
       await AsyncStorage.removeItem("pnlDate");
       await AsyncStorage.removeItem("startEquity");
       await AsyncStorage.removeItem("startBalance");

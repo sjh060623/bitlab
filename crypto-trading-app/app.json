@@ -15,7 +15,10 @@
       }
     },
     "ios": {
-      "bundleIdentifier": "com.sjh060623.cryptotradingapp"
+      "bundleIdentifier": "com.sjh060623.bitlab.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "splash": {
       "image": "./assets/splash-icon.png",

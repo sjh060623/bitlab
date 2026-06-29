@@ -2,14 +2,12 @@ import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
-  FlatList,
-  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -23,8 +21,6 @@ import { Storage } from "../utils/storage";
 
 const COIN_LIST = [
   { name: "Bitcoin", symbol: "BTCUSDT", icon: "bitcoin", color: "#f7931a", precision: 2 },
-  { name: "Ethereum", symbol: "ETHUSDT", icon: "ethereum", color: "#627eea", precision: 2 },
-  { name: "Ripple", symbol: "XRPUSDT", icon: "mixer", color: "#fff", precision: 4 },
 ];
 
 const OrderRow = React.memo(({ price, amount, width, type }) => {
@@ -107,11 +103,10 @@ const OrderBook = React.memo(({ symbol, currentPrice, type, precision }) => {
 });
 
 export default function TradeScreen() {
-  const params = useLocalSearchParams();
-  const [activeSymbol, setActiveSymbol] = useState(params.symbol || "BTCUSDT");
+  const activeSymbol = "BTCUSDT";
   const displaySymbol = activeSymbol.replace("USDT", "") + "/USDT";
 
-  const activeCoin = COIN_LIST.find(c => c.symbol === activeSymbol) || COIN_LIST[0];
+  const activeCoin = COIN_LIST[0];
   const precision = activeCoin.precision;
 
   const { price: currentPrice, change: priceChange } = useBinanceTicker(
@@ -125,7 +120,6 @@ export default function TradeScreen() {
   const [holding, setHolding] = useState({ amount: 0, avgPrice: 0 });
   const [amountPercent, setAmountPercent] = useState(0);
   const [side, setSide] = useState("BUY");
-  const [coinModalVisible, setCoinModalVisible] = useState(false);
 
   const loadData = useCallback(async () => {
     const bal = await Storage.getBalance();
@@ -142,18 +136,6 @@ export default function TradeScreen() {
       return () => clearInterval(interval);
     }, [loadData])
   );
-
-  useEffect(() => {
-      if(params.symbol && params.symbol !== activeSymbol) {
-          setActiveSymbol(params.symbol);
-      }
-  }, [params.symbol]);
-
-  const handleCoinSelect = (coin) => {
-      setActiveSymbol(coin.symbol);
-      setCoinModalVisible(false);
-      setAmountPercent(0); 
-  };
 
   const handleOrder = async () => {
     if (isLoading) return;
@@ -219,11 +201,7 @@ export default function TradeScreen() {
   return (
     <LinearGradient colors={Colors.backgroundGradient} style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity 
-            style={styles.headerLeft} 
-            onPress={() => setCoinModalVisible(true)}
-            activeOpacity={0.7}
-        >
+        <View style={styles.headerLeft}>
           <View style={styles.iconBg}>
             <FontAwesome5
               name={activeCoin.icon}
@@ -235,7 +213,6 @@ export default function TradeScreen() {
           <View>
             <View style={{flexDirection:'row', alignItems:'center', gap: 4}}>
                 <Text style={styles.symbol}>{displaySymbol}</Text>
-                <Ionicons name="caret-down" size={12} color={Colors.textDim} />
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
               <Text style={[styles.price, { color: Colors.up }]}>
@@ -255,7 +232,7 @@ export default function TradeScreen() {
               )}
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
 
         <View style={styles.headerRight}>
           <Text style={styles.label}>Available</Text>
@@ -442,52 +419,6 @@ export default function TradeScreen() {
           </BlurView>
         )}
       </View>
-
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={coinModalVisible}
-        onRequestClose={() => setCoinModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-            <BlurView intensity={50} tint="dark" style={styles.coinModalContent}>
-                <Text style={styles.modalTitle}>Select Spot Market</Text>
-                
-                <FlatList 
-                    data={COIN_LIST}
-                    keyExtractor={item => item.symbol}
-                    contentContainerStyle={{width:'100%'}}
-                    renderItem={({item}) => (
-                        <TouchableOpacity 
-                            style={[
-                                styles.coinItem, 
-                                activeSymbol === item.symbol && {backgroundColor: 'rgba(255,255,255,0.1)'}
-                            ]}
-                            onPress={() => handleCoinSelect(item)}
-                        >
-                            <View style={[styles.iconBg, {backgroundColor: item.color, marginRight: 10}]}>
-                                <FontAwesome5 
-                                    name={item.icon} 
-                                    size={16} 
-                                    color={item.icon === 'mixer' ? '#000' : '#fff'} 
-                                    style={item.icon === 'mixer' ? {transform:[{rotate:'90deg'}]} : {}}
-                                />
-                            </View>
-                            <Text style={styles.coinName}>{item.name}</Text>
-                            <Text style={styles.coinSymbol}>{item.symbol.replace("USDT","")}</Text>
-                        </TouchableOpacity>
-                    )}
-                />
-
-                <TouchableOpacity
-                    style={[styles.modalBtn, {marginTop: 20}]}
-                    onPress={() => setCoinModalVisible(false)}
-                >
-                    <Text style={styles.modalBtnText}>Cancel</Text>
-                </TouchableOpacity>
-            </BlurView>
-        </View>
-      </Modal>
 
     </LinearGradient>
   );

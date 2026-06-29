@@ -2,13 +2,12 @@ import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useState, useRef } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
-  FlatList,
   Modal,
   ScrollView,
   StyleSheet,
@@ -23,10 +22,10 @@ import useBinanceOrderBook from "../hooks/useBinanceOrderBook";
 import { Storage } from "../utils/storage";
 
 const COIN_LIST = [
-  { name: "Bitcoin", symbol: "BTCUSDT", icon: "bitcoin", color: "#f7931a", precision: 1 },
-  { name: "Ethereum", symbol: "ETHUSDT", icon: "ethereum", color: "#627eea", precision: 2 },
-  { name: "Ripple", symbol: "XRPUSDT", icon: "mixer", color: "#fff", precision: 4 },
+  { name: "Bitcoin", symbol: "BTCUSDT", icon: "bitcoin", color: "#f7931a", precision: 2 },
 ];
+
+const LEVERAGE_PRESETS = [10, 25, 30, 50, 75, 125];
 
 const calcPositionDetails = (pos, currentPrice) => {
   if (!pos || !currentPrice)
@@ -246,30 +245,39 @@ const PositionCard = React.memo(({ pos, currentPrice, onPressClose, isLoading })
 });
 
 export default function FuturesScreen() {
-  const router = useRouter();
-  const params = useLocalSearchParams();
-  const [activeSymbol, setActiveSymbol] = useState(params.symbol || "BTCUSDT");
+  const activeSymbol = "BTCUSDT";
   const displaySymbol = activeSymbol.replace("USDT", "") + "/USDT";
 
-  const activeCoin = COIN_LIST.find(c => c.symbol === activeSymbol) || COIN_LIST[0];
-  const precision = activeCoin.precision;
+  const activeCoin = COIN_LIST[0];
+  const precision = 2;
 
   const { price: currentPrice, change: priceChange } = useBinanceTicker(
     activeSymbol,
     "FUTURES",
   );
+
+  useEffect(() => {
+    console.log('[FuturesScreen] ticker update', {
+      activeSymbol,
+      currentPrice,
+      priceChange,
+      isLoading: !currentPrice || currentPrice === 0,
+    });
+  }, [activeSymbol, currentPrice, priceChange]);
+
   const isLoading = !currentPrice || currentPrice === 0;
 
   const [balance, setBalance] = useState(0);
   const [positions, setPositions] = useState([]);
-  const [leverage, setLeverage] = useState(20);
+  const [leverage, setLeverage] = useState(10);
   const [amountPercent, setAmountPercent] = useState(0);
-  const [side, setSide] = useState(params.side || "LONG");
+  const [side, setSide] = useState("LONG");
 
   const [levModalVisible, setLevModalVisible] = useState(false);
   const [closeModalVisible, setCloseModalVisible] = useState(false);
-  const [coinModalVisible, setCoinModalVisible] = useState(false);
   const [targetPosition, setTargetPosition] = useState(null);
+  const closeSymbol = targetPosition?.symbol || activeSymbol;
+  const { price: closePrice } = useBinanceTicker(closeSymbol, "FUTURES");
 
   const loadData = useCallback(async () => {
     const bal = await Storage.getBalance();
@@ -281,21 +289,9 @@ export default function FuturesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-      const interval = setInterval(loadData, 1000);
-      return () => clearInterval(interval);
+      return undefined;
     }, [loadData]),
   );
-
-  useEffect(() => {
-    if (params.symbol && params.symbol !== activeSymbol) {
-      setActiveSymbol(params.symbol);
-    }
-  }, [params.symbol]);
-
-  const handleCoinSelect = (coin) => {
-    setActiveSymbol(coin.symbol);
-    setCoinModalVisible(false);
-  };
 
   const handleOrder = async () => {
     if (isLoading) return;
@@ -334,8 +330,9 @@ export default function FuturesScreen() {
   const confirmClose = async () => {
     if (!targetPosition) return;
 
-    const { net } = calcPositionDetails(targetPosition, currentPrice);
-    const result = await Storage.closePosition(targetPosition.id, net);
+    const settlePrice = closePrice > 0 ? closePrice : currentPrice;
+    const { net } = calcPositionDetails(targetPosition, settlePrice);
+    const result = await Storage.closePosition(targetPosition.id, net, settlePrice);
 
     if (result) {
       loadData();
@@ -353,58 +350,54 @@ export default function FuturesScreen() {
 
   return (
     <LinearGradient colors={Colors.backgroundGradient} style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.headerLeft}
-          onPress={() => setCoinModalVisible(true)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.iconBg}>
-            <FontAwesome5
-              name={activeCoin.icon}
-              size={16}
-              color={activeCoin.icon === "mixer" ? "#000" : "#fff"}
-              style={activeCoin.icon === "mixer" ? {transform:[{rotate:'90deg'}]} : {}}
-            />
-          </View>
-          <View>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
-            >
-              <Text style={styles.symbol}>{displaySymbol}</Text>
-              <Ionicons name="caret-down" size={12} color={Colors.textDim} />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <View style={styles.iconBg}>
+              <FontAwesome5
+                name={activeCoin.icon}
+                size={16}
+                color={activeCoin.icon === "mixer" ? "#000" : "#fff"}
+                style={activeCoin.icon === "mixer" ? {transform:[{rotate:'90deg'}]} : {}}
+              />
             </View>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
-            >
-              <Text style={[styles.price, { color: Colors.up }]}>
-                {isLoading ? "Loading..." : `$${currentPrice.toLocaleString(undefined, {minimumFractionDigits: precision})}`}
-              </Text>
-              {!isLoading && (
-                <Text
-                  style={{
-                    color: priceChange >= 0 ? Colors.up : Colors.down,
-                    fontSize: 12,
-                    fontWeight: "bold",
-                  }}
-                >
-                  {priceChange >= 0 ? "+" : ""}
-                  {priceChange.toFixed(2)}%
+            <View>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
+                <Text style={styles.symbol}>{displaySymbol}</Text>
+              </View>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
+              >
+                <Text style={[styles.price, { color: Colors.up }]}>
+                  {isLoading ? "Loading..." : `$${currentPrice.toLocaleString(undefined, {minimumFractionDigits: precision})}`}
                 </Text>
-              )}
+                {!isLoading && (
+                  <Text
+                    style={{
+                      color: priceChange >= 0 ? Colors.up : Colors.down,
+                      fontSize: 12,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    {priceChange >= 0 ? "+" : ""}
+                    {priceChange.toFixed(2)}%
+                  </Text>
+                )}
+              </View>
             </View>
           </View>
-        </TouchableOpacity>
 
-        <View style={styles.headerRight}>
-          <Text style={styles.label}>Available</Text>
-          <Text style={styles.balance}>
-            ${balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-          </Text>
+          <View style={styles.headerRight}>
+            <Text style={styles.label}>Available</Text>
+            <Text style={styles.balance}>
+              ${balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      <View style={styles.contentContainer}>
+        <View style={styles.contentContainer}>
         <BlurView intensity={20} tint="dark" style={styles.controlPanel}>
           <View style={styles.tabContainer}>
             <TouchableOpacity
@@ -510,41 +503,40 @@ export default function FuturesScreen() {
         </View>
       </View>
 
-      <View style={{ flex: 1, paddingHorizontal: 15, marginTop: 15 }}>
+      <View style={{ paddingHorizontal: 15, marginTop: 0 }}>
         <Text style={styles.sectionTitle}>
           My Positions (
           {positions.filter((p) => p.symbol === activeSymbol).length})
         </Text>
 
-        <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
-          {positions
-            .filter((p) => p.symbol === activeSymbol)
-            .map((pos) => (
-              <PositionCard
-                key={pos.id}
-                pos={pos}
-                currentPrice={currentPrice}
-                onPressClose={onPressClose}
-                isLoading={isLoading}
-              />
-            ))}
+        {positions
+          .filter((p) => p.symbol === activeSymbol)
+          .map((pos) => (
+            <PositionCard
+              key={pos.id}
+              pos={pos}
+              currentPrice={currentPrice}
+              onPressClose={onPressClose}
+              isLoading={isLoading}
+            />
+          ))}
 
-          {positions.filter((p) => p.symbol === activeSymbol).length === 0 && (
-            <BlurView intensity={20} tint="dark" style={styles.emptyCard}>
-              <Ionicons
-                name="documents-outline"
-                size={30}
-                color={Colors.textDim}
-              />
-              <Text
-                style={{ color: Colors.textDim, marginTop: 10, fontSize: 12 }}
-              >
-                No open positions for {activeSymbol}
-              </Text>
-            </BlurView>
-          )}
-        </ScrollView>
+        {positions.filter((p) => p.symbol === activeSymbol).length === 0 && (
+          <BlurView intensity={20} tint="dark" style={styles.emptyCard}>
+            <Ionicons
+              name="documents-outline"
+              size={30}
+              color={Colors.textDim}
+            />
+            <Text
+              style={{ color: Colors.textDim, marginTop: 10, fontSize: 12 }}
+            >
+              No open positions for {activeSymbol}
+            </Text>
+          </BlurView>
+        )}
       </View>
+      </ScrollView>
 
       <Modal
         animationType="fade"
@@ -566,9 +558,26 @@ export default function FuturesScreen() {
               minimumTrackTintColor={Colors.up}
               thumbTintColor="#fff"
             />
-            <View style={styles.rowBetween}>
-              <Text style={styles.smallLabel}>1x</Text>
-              <Text style={styles.smallLabel}>125x</Text>
+            <View style={styles.levPresetWrap}>
+              {LEVERAGE_PRESETS.map((item) => (
+                <TouchableOpacity
+                  key={item}
+                  onPress={() => setLeverage(item)}
+                  style={[
+                    styles.levPresetBtn,
+                    leverage === item && styles.levPresetBtnActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.levPresetText,
+                      leverage === item && styles.levPresetTextActive,
+                    ]}
+                  >
+                    {item}배
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
             <TouchableOpacity
               style={styles.modalBtn}
@@ -595,7 +604,8 @@ export default function FuturesScreen() {
                   return (
                     <Text style={{ color: "#fff" }}>Loading price...</Text>
                   );
-                const d = calcPositionDetails(targetPosition, currentPrice);
+                const settlePrice = closePrice > 0 ? closePrice : currentPrice;
+                const d = calcPositionDetails(targetPosition, settlePrice);
                 return (
                   <View style={{ width: "100%" }}>
                     <View style={styles.confirmRow}>
@@ -676,75 +686,18 @@ export default function FuturesScreen() {
         </View>
       </Modal>
 
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={coinModalVisible}
-        onRequestClose={() => setCoinModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <BlurView intensity={50} tint="dark" style={styles.coinModalContent}>
-            <Text style={styles.modalTitle}>Select Market</Text>
-
-            <FlatList
-              data={COIN_LIST}
-              keyExtractor={(item) => item.symbol}
-              contentContainerStyle={{ width: "100%" }}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.coinItem,
-                    activeSymbol === item.symbol && {
-                      backgroundColor: "rgba(255,255,255,0.1)",
-                    },
-                  ]}
-                  onPress={() => handleCoinSelect(item)}
-                >
-                  <View
-                    style={[
-                      styles.iconBg,
-                      { backgroundColor: item.color, marginRight: 10 },
-                    ]}
-                  >
-                    <FontAwesome5
-                      name={item.icon}
-                      size={16}
-                      color={item.icon === "mixer" ? "#000" : "#fff"}
-                      style={
-                        item.icon === "mixer"
-                          ? { transform: [{ rotate: "90deg" }] }
-                          : {}
-                      }
-                    />
-                  </View>
-                  <Text style={styles.coinName}>{item.name}</Text>
-                  <Text style={styles.coinSymbol}>
-                    {item.symbol.replace("USDT", "")}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            />
-
-            <TouchableOpacity
-              style={[styles.modalBtn, { marginTop: 20 }]}
-              onPress={() => setCoinModalVisible(false)}
-            >
-              <Text style={styles.modalBtnText}>Cancel</Text>
-            </TouchableOpacity>
-          </BlurView>
-        </View>
-      </Modal>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 50 },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 20,
     marginBottom: 15,
+    paddingTop: 50,
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   iconBg: {
@@ -764,7 +717,8 @@ const styles = StyleSheet.create({
   contentContainer: {
     flexDirection: "row",
     paddingHorizontal: 15,
-    height: 380,
+    marginBottom: 15,
+    minHeight: 380,
   },
   controlPanel: {
     flex: 0.6,
@@ -830,6 +784,36 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 2,
+  },
+  levPresetWrap: {
+    width: "100%",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    marginTop: 2,
+    rowGap: 8,
+  },
+  levPresetBtn: {
+    width: "31%",
+    borderRadius: 8,
+    paddingVertical: 7,
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  levPresetBtnActive: {
+    backgroundColor: "rgba(38, 166, 154, 0.2)",
+    borderColor: Colors.up,
+  },
+  levPresetText: {
+    color: Colors.textDim,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  levPresetTextActive: {
+    color: "#fff",
+    fontWeight: "bold",
   },
   smallLabel: { color: Colors.textDim, fontSize: 10 },
   valueText: { color: "#fff", fontSize: 12, fontWeight: "bold" },
